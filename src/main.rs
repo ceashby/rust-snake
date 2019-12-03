@@ -152,11 +152,12 @@ fn draw(stdout: &mut RawTerminal<Stdout>, board: &Board){
         let mut string = "".to_string();
         for x in 0..board.width {
             if y == board.player.head().y as usize && x == board.player.head().x as usize {
-                string.push_str(&board.player.symbol());
+//                string.push_str(&board.player.symbol());
+                string.push_str("█");
             } else if find_point(&board.player.points, x as isize, y as isize).is_some(){
-                string.push_str("•")
+                string.push_str("█")
             }else if find_point(&board.dots, x as isize, y as isize).is_some() {
-                string.push_str("·");
+                string.push_str("•");
             }else{
                 string.push_str(" ");
             }
