@@ -18,6 +18,10 @@ impl Player {
         return *self.points.last().unwrap();
     }
 
+    fn body(&self) -> &[Point] {
+        return &self.points[..self.points.len() - 1];
+    }
+
     fn set_direction(&mut self, direction: Direction) {
         let len = self.points.len();
         if len > 1 && self.points[len - 2] == self.head().relative(&direction) {
@@ -92,8 +96,12 @@ fn remove_multiple<T>(vector: &mut Vec<T>, indexes: &Vec<usize>){
     vector.retain(|_| (!indexes.contains(&i), i += 1).0);
 }
 
-fn find_point(points: &Vec<Point>, point: Point) -> Option<usize>{
+fn find_point(points: &[Point], point: Point) -> Option<usize>{
     return points.iter().position(|p| *p == point);
+}
+
+fn contains_point(points: &[Point], point: Point) -> bool{
+    return points.iter().position(|p| *p == point).is_some();
 }
 
 struct Board {
@@ -108,8 +116,8 @@ impl Board {
         loop{
             let point = Point::random(self.width, self.height);
 
-            if find_point(&self.eggs, point).is_none() &&
-                !self.is_occupied_by_player(point){
+            if !self.point_contains_egg(point) &&
+                !self.point_contains_player(point){
 
                 return point;
             }
@@ -123,11 +131,27 @@ impl Board {
         }
     }
 
-    fn is_occupied_by_player(&self, point: Point) -> bool{
-        return self.players.iter().any( |p| find_point(&p.points, point).is_some());
+    fn point_contains_player(&self, point: Point) -> bool {
+        return self.players.iter().any(
+            |p| contains_point(&p.points, point)
+        );
     }
 
-    fn is_out_of_bounds(&self, point: Point) -> bool{
+    fn point_contains_egg(&self, point: Point) -> bool {
+        return contains_point(&self.eggs, point);
+    }
+
+    fn point_contains_body(&self, point: Point, player: &Player) -> bool {
+        return contains_point(player.body(), point);
+    }
+
+    fn point_contains_other_player(&self, point: Point, player: &Player) -> bool{
+        return self.players.iter().any(
+            |p| !std::ptr::eq(p, player) && contains_point(&p.points, point)
+        );
+    }
+
+    fn point_is_out_of_bounds(&self, point: Point) -> bool{
          return point.x as usize >= self.width ||
             point.y < 0 ||
             point.y as usize >= self.height ||
@@ -140,8 +164,7 @@ impl Board {
 
         let (player0, player1) = unpack( &self.players);
         if player0.head() == player1.head(){
-            dead_players.push(0);
-            dead_players.push(1);
+            dead_players.extend_from_slice(&[0, 1]);
             panic!(game_over_message(&*self.players, &*dead_players))
         }
 
@@ -159,8 +182,9 @@ impl Board {
         }
 
         for (i, player) in self.players.iter().enumerate() {
-            let died =  self.is_out_of_bounds(player.head()) ||
-                self.is_occupied_by_player(player.head());
+            let died =  self.point_is_out_of_bounds(player.head()) ||
+                self.point_contains_other_player(player.head(), player) ||
+                self.point_contains_body(player.head(), player);
 
             if died {
                 dead_players.push( i);
@@ -203,7 +227,7 @@ fn draw(stdout: &mut RawTerminal<Stdout>, board: &Board) {
         let mut string = "".to_string();
         for x in 0..board.width {
             let point = Point{x: x as isize, y: y as isize};
-            if board.is_occupied_by_player(point){
+            if board.point_contains_player(point){
                 string.push_str("█")
             }else if find_point(&board.eggs, point).is_some() {
                 string.push_str("•");
@@ -291,14 +315,14 @@ fn main() {
         if let Some(Ok(key)) = result {
             match key {
                 Key::Char('q') => break,
-                Key::Left => player0.set_direction(Direction::Left),
-                Key::Right => player0.set_direction(Direction::Right),
-                Key::Up => player0.set_direction(Direction::Up),
-                Key::Down => player0.set_direction(Direction::Down),
-                Key::Char('a') => player1.set_direction(Direction::Left),
-                Key::Char('d') => player1.set_direction(Direction::Right),
-                Key::Char('w') => player1.set_direction(Direction::Up),
-                Key::Char('s') => player1.set_direction(Direction::Down),
+                Key::Left => player1.set_direction(Direction::Left),
+                Key::Right => player1.set_direction(Direction::Right),
+                Key::Up => player1.set_direction(Direction::Up),
+                Key::Down => player1.set_direction(Direction::Down),
+                Key::Char('a') => player0.set_direction(Direction::Left),
+                Key::Char('d') => player0.set_direction(Direction::Right),
+                Key::Char('w') => player0.set_direction(Direction::Up),
+                Key::Char('s') => player0.set_direction(Direction::Down),
                 _ => {},
             }
         }
