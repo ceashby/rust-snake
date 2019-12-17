@@ -14,21 +14,35 @@ struct Player {
 }
 
 impl Player {
-    fn symbol(&self) -> String{
-        match self.direction {
-            Direction::Up => "↑".to_string(),
-            Direction::Down => "↓".to_string(),
-            Direction::Left => "←".to_string(),
-            Direction::Right => "→".to_string(),
+    fn head(&self) -> Point {
+        return *self.points.last().unwrap();
+    }
+
+    fn set_direction(&mut self, direction: Direction) {
+        let len = self.points.len();
+        if len > 1 && self.points[len - 2] == self.head().relative(&direction) {
+            return;
+        } else {
+            self.direction = direction;
         }
     }
 
-    fn head(&self) -> &Point {
-        return self.points.last().unwrap();
+    fn stretch(&mut self){
+        let new_head = self.head().relative(&self.direction);
+        self.points.push(new_head);
+    }
+
+    fn shrink(&mut self){
+        self.points.remove(0);
+    }
+
+    fn score(& self, is_dead: bool) -> isize{
+        let penalty = if is_dead  {-4} else {0};
+        return (self.points.len() as isize) - 1 + penalty;
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 enum Direction {
     Up,
     Down,
@@ -36,15 +50,23 @@ enum Direction {
     Right,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 struct Point {
     x: isize,
     y: isize,
 }
 
 impl Point {
+    fn random(width: usize, height: usize) -> Point{
+        let mut rng = rand::thread_rng();
+        return Point {
+            x: rng.gen_range(0, width) as isize,
+            y: rng.gen_range(0, height) as isize,
+        };
+    }
+
     fn relative(&self, direction: &Direction) -> Point {
-        match direction {
+        return match direction {
             Direction::Up => Point {
                 x: self.x,
                 y: self.y - 1,
@@ -61,145 +83,161 @@ impl Point {
                 x: self.x + 1,
                 y: self.y,
             },
-        }
+        };
     }
+}
+
+fn remove_multiple<T>(vector: &mut Vec<T>, indexes: &Vec<usize>){
+    let mut i:usize = 0;
+    vector.retain(|_| (!indexes.contains(&i), i += 1).0);
+}
+
+fn find_point(points: &Vec<Point>, point: Point) -> Option<usize>{
+    return points.iter().position(|p| *p == point);
 }
 
 struct Board {
     width: usize,
     height: usize,
     players: Vec<Player>,
-    dots: Vec<Point>,
-}
-
-fn find_point(points: &Vec<Point>, x: isize, y: isize) -> Option<usize>{
-    points.iter().position(|d| d.x == x && d.y == y)
+    eggs: Vec<Point>,
 }
 
 impl Board {
-    fn create_dot(&self) -> Point{
-        let mut rng = rand::thread_rng();
+    fn new_egg_position(&self) -> Point{
         loop{
-            let x = rng.gen_range(0, self.width) as isize;
-            let y = rng.gen_range(0, self.height) as isize;
+            let point = Point::random(self.width, self.height);
 
-            if find_point(&self.dots, x, y).is_none() &&
-                find_point(&self.players[0].points, x, y).is_none() &&
-                find_point(&self.players[1].points, x, y).is_none(){
-                return Point{x, y};
+            if find_point(&self.eggs, point).is_none() &&
+                !self.is_occupied_by_player(point){
+
+                return point;
             }
         }
     }
 
-    fn set_player_direction(&mut self, direction: Direction, player_index: usize) {
-        let len = self.players[player_index].points.len();
-        if len > 1 && self.players[player_index].points[len - 2] == self.players[player_index].head().relative(&direction) {
-            return;
-        } else {
-            self.players[player_index].direction = direction
+    fn add_eggs(&mut self, n: usize){
+        for _ in 0..n{
+            let point = self.new_egg_position();
+            self.eggs.push(point);
         }
     }
 
-    fn move_player(&mut self, player_index: usize){
-        let new_head = self.players[player_index].head().relative(&self.players[player_index].direction);
-
-        self.players[player_index].points.push(new_head)
+    fn is_occupied_by_player(&self, point: Point) -> bool{
+        return self.players.iter().any( |p| find_point(&p.points, point).is_some());
     }
 
-    fn step(&mut self) {
-        self.move_player(1);
-        self.move_player(2);
-        self.check_collisions()
+    fn is_out_of_bounds(&self, point: Point) -> bool{
+         return point.x as usize >= self.width ||
+            point.y < 0 ||
+            point.y as usize >= self.height ||
+            point.x < 0;
     }
 
-    fn check_collisions(&mut self){
-        let mut new_dots: Vec<Point> = vec![];
+    fn step(&mut self){
+        let mut eggs_eaten = vec![];
+        let mut dead_players = vec![];
+
+        let (player0, player1) = unpack( &self.players);
+        if player0.head() == player1.head(){
+            dead_players.push(0);
+            dead_players.push(1);
+            panic!(game_over_message(&*self.players, &*dead_players))
+        }
+
         for player in &mut self.players {
-            let result = find_point(
-                &self.dots,
-                player.head().x,
-                player.head().y
-            );
-
-            match result {
+            player.stretch();
+            let found_egg = find_point(&self.eggs,player.head());
+            match found_egg {
                 Some(index) => {
-                    self.dots.remove(index);
-                    let dot = self.create_dot();
-                    new_dots.push(dot);
+                    &eggs_eaten.push(index);
                 },
                 None => {
-                    player.points.remove(0);
+                    player.shrink();
                 },
             }
+        }
 
-            if player.head().x as usize >= self.width ||
-                player.head().y < 0 ||
-                player.head().y as usize >= self.height ||
-                player.head().x < 0 {
-                panic!("Game Over");
+        for (i, player) in self.players.iter().enumerate() {
+            let died =  self.is_out_of_bounds(player.head()) ||
+                self.is_occupied_by_player(player.head());
+
+            if died {
+                dead_players.push( i);
             }
         }
 
-        for dot in new_dots{
-            self.dots.push(dot);
-        }
+        remove_multiple(&mut self.eggs, &eggs_eaten);
+        self.add_eggs(eggs_eaten.len());
 
 
-//        let &player_1 = self.players[0];
-//        let &self.players[1] = self.players[1];
-
-        let index = find_point(&self.players[0].points, self.players[0].head().x, self.players[0].head().y).unwrap();
-        if index != self.players[0].points.len() - 1{
-            panic!("Game Over");
-        }
-
-        let index = find_point(&self.players[1].points, self.players[1].head().x, self.players[1].head().y).unwrap();
-        if index != self.players[0].points.len() - 1{
-            panic!("Game Over");
-        }
-
-        if find_point(&self.players[1].points, self.players[0].head().x, self.players[0].head().y).is_some(){
-            panic!("Game Over");
-        }
-
-        if find_point(&self.players[0].points, self.players[1].head().x, self.players[1].head().y).is_some(){
-            panic!("Game Over");
+        if dead_players.len() > 0 {
+            panic!(game_over_message(&self.players, &*dead_players))
         }
     }
 }
 
-fn draw(stdout: &mut RawTerminal<Stdout>, board: &Board) {
-//    write!(stdout,
-//       "{}",
-//       termion::clear::All
-//    ).unwrap();
+fn game_over_message(players: &[Player], dead_players: &[usize]) -> String{
+    let (player0, player1) = unpack(players);
+    let player0_dead = dead_players.contains(&(0 as usize));
+    let player1_dead = dead_players.contains(&(1 as usize));
 
+    let message = if player0_dead && player1_dead {
+        "Both died"
+    } else if player0_dead {
+        "Player 1 died"
+    }else {
+        "Player 2 died"
+    };
+
+    return format!(
+        "Game Over: {} {}____{}",
+        message,
+        player0.score(player0_dead),
+        player1.score(player1_dead),
+    )
+}
+
+fn draw(stdout: &mut RawTerminal<Stdout>, board: &Board) {
     for y in 0..board.height {
         let mut string = "".to_string();
         for x in 0..board.width {
-            if y == board.players[0].head().y as usize && x == board.players[0].head().x as usize {
-                string.push_str(&board.players[0].symbol());
-                if y == board.players[1].head().y as usize && x == board.players[1].head().x as usize {
-                    string.push_str(&board.players[1].symbol());
-                } else if find_point(&board.players[0].points, x as isize, y as isize).is_some() {
-                    string.push_str("•")
-                } else if find_point(&board.players[1].points, x as isize, y as isize).is_some() {
-                    string.push_str("•")
-                } else if find_point(&board.dots, x as isize, y as isize).is_some() {
-                    string.push_str("·");
-                } else {
-                    string.push_str(" ");
-                }
+            let point = Point{x: x as isize, y: y as isize};
+            if board.is_occupied_by_player(point){
+                string.push_str("█")
+            }else if find_point(&board.eggs, point).is_some() {
+                string.push_str("•");
+            }else{
+                string.push_str(" ");
             }
-            string.push_str("█");
-            writeln!(stdout, "{}{}", termion::cursor::Goto(1, y as u16 + 1), string).unwrap();
+
         }
+        string.push_str("█");
+        writeln!(stdout, "{}{}", termion::cursor::Goto(1, y as u16 + 1), string).unwrap();
+    }
 
-        writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 1), "█".repeat(board.width + 1)).unwrap();
+    writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 1), "█".repeat(board.width + 1)).unwrap();
 
-        writeln!(stdout, "{}{}--{}", termion::cursor::Goto(1, board.height as u16 + 2), board.players[0].points.len() - 1, board.players[1].points.len() - 1).unwrap();
+    let (player0, player1) = unpack(&board.players);
+    writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 2), player0.points.len() - 1).unwrap();
+    writeln!(stdout, "{}{}", termion::cursor::Goto(board.width as u16, board.height as u16 + 2), player1.points.len() - 1).unwrap();
 
-        stdout.flush().unwrap();
+    stdout.flush().unwrap();
+}
+
+fn unpack_mut<T>(pair: &mut [T]) -> (&mut T, &mut T){
+    if let [player0, player1] = &mut pair[..2]{
+        return (player0, player1)
+    }else{
+        panic!("Wrong number of items")
+    }
+}
+
+fn unpack<T>(pair: &[T]) -> (&T, &T){
+    if let [player0, player1] = &pair[..2]{
+        return (player0, player1)
+    }else{
+        panic!("Wrong number of items")
     }
 }
 
@@ -207,10 +245,13 @@ fn main() {
     let mut stdout = stdout().into_raw_mode().unwrap();
     let mut stdin = async_stdin().keys();
 
+    let width = 30;
+    let height = 20;
+
     let mut board = Board{
-        width: 30,
-        height: 20,
-        dots: vec![],
+        width,
+        height,
+        eggs: vec![],
         players: vec![
             Player{
                 direction: Direction::Right,
@@ -225,18 +266,14 @@ fn main() {
                 direction: Direction::Left,
                 points: vec![
                     Point {
-                        x: 29,
-                        y: 19,
+                        x: width as isize - 1,
+                        y: height as isize - 1,
                     }
                 ],
             },
         ]
     };
-
-    board.create_dot();
-    board.create_dot();
-    board.create_dot();
-    board.create_dot();
+    board.add_eggs(4);
 
     let mut iteration = 0;
     write!(stdout,
@@ -249,17 +286,19 @@ fn main() {
         iteration +=1;
         thread::sleep(time::Duration::from_millis(10));
         let result = stdin.next();
+        let (player0, player1) = unpack_mut(&mut board.players);
+
         if let Some(Ok(key)) = result {
             match key {
                 Key::Char('q') => break,
-                Key::Left => board.set_player_direction(Direction::Left, 1),
-                Key::Right => board.set_player_direction(Direction::Right, 1),
-                Key::Up => board.set_player_direction(Direction::Up, 1),
-                Key::Down => board.set_player_direction(Direction::Down, 1),
-                Key::Char('A') => board.set_player_direction(Direction::Left, 1),
-                Key::Char('D') => board.set_player_direction(Direction::Right, 1),
-                Key::Char('W') => board.set_player_direction(Direction::Up, 1),
-                Key::Char('S') => board.set_player_direction(Direction::Down, 1),
+                Key::Left => player0.set_direction(Direction::Left),
+                Key::Right => player0.set_direction(Direction::Right),
+                Key::Up => player0.set_direction(Direction::Up),
+                Key::Down => player0.set_direction(Direction::Down),
+                Key::Char('a') => player1.set_direction(Direction::Left),
+                Key::Char('d') => player1.set_direction(Direction::Right),
+                Key::Char('w') => player1.set_direction(Direction::Up),
+                Key::Char('s') => player1.set_direction(Direction::Down),
                 _ => {},
             }
         }
