@@ -8,31 +8,32 @@ use std::io::{Write, stdout, Stdout};
 use std::{time, thread};
 use termion::async_stdin;
 
-struct Player {
+static DEATH_PENALTY: isize = -4;
+
+
+struct Snake {
     points: Vec<Point>,
     direction: Direction,
 }
 
-impl Player {
+impl Snake {
     fn head(&self) -> Point {
-        return *self.points.last().unwrap();
+        *self.points.last().unwrap()
     }
 
     fn body(&self) -> &[Point] {
-        return &self.points[..self.points.len() - 1];
+        &self.points[..self.points.len() - 1]
     }
 
     fn set_direction(&mut self, direction: Direction) {
         let len = self.points.len();
-        if len > 1 && self.points[len - 2] == self.head().relative(&direction) {
-            return;
-        } else {
+        if len == 1 || self.points[len - 2] != self.head().relative(direction) {
             self.direction = direction;
         }
     }
 
     fn stretch(&mut self){
-        let new_head = self.head().relative(&self.direction);
+        let new_head = self.head().relative(self.direction);
         self.points.push(new_head);
     }
 
@@ -41,8 +42,8 @@ impl Player {
     }
 
     fn score(& self, is_dead: bool) -> isize{
-        let penalty = if is_dead  {-4} else {0};
-        return (self.points.len() as isize) - 1 + penalty;
+        let penalty = if is_dead  {DEATH_PENALTY} else {0};
+        (self.points.len() as isize) - 1 + penalty
     }
 }
 
@@ -63,14 +64,14 @@ struct Point {
 impl Point {
     fn random(width: usize, height: usize) -> Point{
         let mut rng = rand::thread_rng();
-        return Point {
+        Point {
             x: rng.gen_range(0, width) as isize,
             y: rng.gen_range(0, height) as isize,
-        };
+        }
     }
 
-    fn relative(&self, direction: &Direction) -> Point {
-        return match direction {
+    fn relative(&self, direction: Direction) -> Point {
+        match direction {
             Direction::Up => Point {
                 x: self.x,
                 y: self.y - 1,
@@ -87,27 +88,43 @@ impl Point {
                 x: self.x + 1,
                 y: self.y,
             },
-        };
+        }
     }
 }
 
-fn remove_multiple<T>(vector: &mut Vec<T>, indexes: &Vec<usize>){
+fn remove_multiple<T>(vector: &mut Vec<T>, indexes: &[usize]){
     let mut i:usize = 0;
     vector.retain(|_| (!indexes.contains(&i), i += 1).0);
 }
 
 fn find_point(points: &[Point], point: Point) -> Option<usize>{
-    return points.iter().position(|p| *p == point);
+    points.iter().position(|p| *p == point)
 }
 
 fn contains_point(points: &[Point], point: Point) -> bool{
-    return points.iter().position(|p| *p == point).is_some();
+    find_point(points, point).is_some()
+}
+
+fn unpack_mut<T>(pair: &mut [T]) -> (&mut T, &mut T){
+    if let [player0, player1] = &mut pair[..2]{
+        (player0, player1)
+    }else{
+        panic!("Wrong number of items")
+    }
+}
+
+fn unpack<T>(pair: &[T]) -> (&T, &T){
+    if let [player0, player1] = &pair[..2]{
+        (player0, player1)
+    }else{
+        panic!("Wrong number of items")
+    }
 }
 
 struct Board {
     width: usize,
     height: usize,
-    players: Vec<Player>,
+    players: Vec<Snake>,
     eggs: Vec<Point>,
 }
 
@@ -117,7 +134,7 @@ impl Board {
             let point = Point::random(self.width, self.height);
 
             if !self.point_contains_egg(point) &&
-                !self.point_contains_player(point){
+                !self.point_contains_snake(point){
 
                 return point;
             }
@@ -131,31 +148,31 @@ impl Board {
         }
     }
 
-    fn point_contains_player(&self, point: Point) -> bool {
-        return self.players.iter().any(
+    fn point_contains_snake(&self, point: Point) -> bool {
+        self.players.iter().any(
             |p| contains_point(&p.points, point)
-        );
+        )
     }
 
     fn point_contains_egg(&self, point: Point) -> bool {
-        return contains_point(&self.eggs, point);
+        contains_point(&self.eggs, point)
     }
 
-    fn point_contains_body(&self, point: Point, player: &Player) -> bool {
-        return contains_point(player.body(), point);
+    fn point_contains_body(&self, point: Point, player: &Snake) -> bool {
+        contains_point(player.body(), point)
     }
 
-    fn point_contains_other_player(&self, point: Point, player: &Player) -> bool{
-        return self.players.iter().any(
+    fn point_contains_other_snake(&self, point: Point, player: &Snake) -> bool{
+        self.players.iter().any(
             |p| !std::ptr::eq(p, player) && contains_point(&p.points, point)
-        );
+        )
     }
 
     fn point_is_out_of_bounds(&self, point: Point) -> bool{
-         return point.x as usize >= self.width ||
+        point.x as usize >= self.width ||
             point.y < 0 ||
             point.y as usize >= self.height ||
-            point.x < 0;
+            point.x < 0
     }
 
     fn step(&mut self){
@@ -164,8 +181,7 @@ impl Board {
 
         let (player0, player1) = unpack( &self.players);
         if player0.head() == player1.head(){
-            dead_players.extend_from_slice(&[0, 1]);
-            panic!(game_over_message(&*self.players, &*dead_players))
+            panic!(game_over_message(&*self.players, &[0, 1]))
         }
 
         for player in &mut self.players {
@@ -173,7 +189,7 @@ impl Board {
             let found_egg = find_point(&self.eggs,player.head());
             match found_egg {
                 Some(index) => {
-                    &eggs_eaten.push(index);
+                    eggs_eaten.push(index);
                 },
                 None => {
                     player.shrink();
@@ -183,7 +199,7 @@ impl Board {
 
         for (i, player) in self.players.iter().enumerate() {
             let died =  self.point_is_out_of_bounds(player.head()) ||
-                self.point_contains_other_player(player.head(), player) ||
+                self.point_contains_other_snake(player.head(), player) ||
                 self.point_contains_body(player.head(), player);
 
             if died {
@@ -191,17 +207,16 @@ impl Board {
             }
         }
 
-        remove_multiple(&mut self.eggs, &eggs_eaten);
-        self.add_eggs(eggs_eaten.len());
-
-
-        if dead_players.len() > 0 {
+        if !dead_players.is_empty() {
             panic!(game_over_message(&self.players, &*dead_players))
         }
+
+        remove_multiple(&mut self.eggs, &eggs_eaten);
+        self.add_eggs(eggs_eaten.len());
     }
 }
 
-fn game_over_message(players: &[Player], dead_players: &[usize]) -> String{
+fn game_over_message(players: &[Snake], dead_players: &[usize]) -> String{
     let (player0, player1) = unpack(players);
     let player0_dead = dead_players.contains(&(0 as usize));
     let player1_dead = dead_players.contains(&(1 as usize));
@@ -214,11 +229,30 @@ fn game_over_message(players: &[Player], dead_players: &[usize]) -> String{
         "Player 2 died"
     };
 
+    let score0 = player0.score(player0_dead);
+    let score1 = player1.score(player1_dead);
+
+    let winner = if score0 > score1 {
+        "Player 1 wins"
+    }else if score0 < score1 {
+        "Player 2 wins"
+    }else if player0_dead && player1_dead {
+        "Draw"
+    }else if player0_dead {
+        "Player 2 wins"
+    }else{
+        "Player 1 wins"
+    };
+
     return format!(
-        "Game Over: {} {}____{}",
+        "Game Over:\n\
+        {}\n\
+        {}\n\
+        {}____{}",
         message,
-        player0.score(player0_dead),
-        player1.score(player1_dead),
+        winner,
+        score0,
+        score1,
     )
 }
 
@@ -227,72 +261,57 @@ fn draw(stdout: &mut RawTerminal<Stdout>, board: &Board) {
         let mut string = "".to_string();
         for x in 0..board.width {
             let point = Point{x: x as isize, y: y as isize};
-            if board.point_contains_player(point){
-                string.push_str("█")
-            }else if find_point(&board.eggs, point).is_some() {
-                string.push_str("•");
+            if board.point_contains_snake(point){
+                string.push_str("██")
+            }else if board.point_contains_egg(point) {
+                string.push_str("◖◗");
             }else{
-                string.push_str(" ");
+                string.push_str("  ");
             }
-
         }
-        string.push_str("█");
+        string.push_str("██");
         writeln!(stdout, "{}{}", termion::cursor::Goto(1, y as u16 + 1), string).unwrap();
     }
 
-    writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 1), "█".repeat(board.width + 1)).unwrap();
+    writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 1), "██".repeat(board.width + 1)).unwrap();
 
     let (player0, player1) = unpack(&board.players);
     writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 2), player0.points.len() - 1).unwrap();
-    writeln!(stdout, "{}{}", termion::cursor::Goto(board.width as u16, board.height as u16 + 2), player1.points.len() - 1).unwrap();
+    writeln!(stdout, "{}{}", termion::cursor::Goto(board.width as u16 * 2, board.height as u16 + 2), player1.points.len() - 1).unwrap();
 
     stdout.flush().unwrap();
-}
-
-fn unpack_mut<T>(pair: &mut [T]) -> (&mut T, &mut T){
-    if let [player0, player1] = &mut pair[..2]{
-        return (player0, player1)
-    }else{
-        panic!("Wrong number of items")
-    }
-}
-
-fn unpack<T>(pair: &[T]) -> (&T, &T){
-    if let [player0, player1] = &pair[..2]{
-        return (player0, player1)
-    }else{
-        panic!("Wrong number of items")
-    }
 }
 
 fn main() {
     let mut stdout = stdout().into_raw_mode().unwrap();
     let mut stdin = async_stdin().keys();
 
-    let width = 30;
-    let height = 20;
+    let width = 20;
+    let height = 15;
+    let reads_per_step = 20;
+    let steps_per_second = 10;
 
     let mut board = Board{
         width,
         height,
         eggs: vec![],
         players: vec![
-            Player{
+            Snake{
                 direction: Direction::Right,
                 points: vec![
                     Point {
                         x: 0,
                         y: 0,
-                    }
+                    },
                 ],
             },
-            Player{
+            Snake{
                 direction: Direction::Left,
                 points: vec![
                     Point {
                         x: width as isize - 1,
                         y: height as isize - 1,
-                    }
+                    },
                 ],
             },
         ]
@@ -308,7 +327,7 @@ fn main() {
 
     loop {
         iteration +=1;
-        thread::sleep(time::Duration::from_millis(10));
+        thread::sleep(time::Duration::from_millis(1000/steps_per_second/reads_per_step));
         let result = stdin.next();
         let (player0, player1) = unpack_mut(&mut board.players);
 
@@ -327,7 +346,7 @@ fn main() {
             }
         }
 
-        if iteration % 10 == 0 {
+        if iteration % reads_per_step == 0 {
             board.step()
         }
 
