@@ -8,7 +8,7 @@ use std::io::{Write, stdout, Stdout};
 use std::{time, thread};
 use termion::async_stdin;
 
-static DEATH_PENALTY: isize = -4;
+static DEATH_PENALTY: isize = -3;
 
 
 struct Snake {
@@ -290,6 +290,7 @@ fn main() {
     let height = 15;
     let reads_per_step = 20;
     let steps_per_second = 10;
+    let eggs = 2;
 
     let mut board = Board{
         width,
@@ -316,7 +317,7 @@ fn main() {
             },
         ]
     };
-    board.add_eggs(4);
+    board.add_eggs(eggs);
 
     let mut iteration = 0;
     write!(stdout,
