@@ -5,11 +5,10 @@ use termion::event::{Key};
 use termion::input::TermRead;
 use termion::raw::{IntoRawMode, RawTerminal};
 use std::io::{Write, stdout, Stdout};
-use std::{time, thread};
+use std::{time, thread, env};
 use termion::async_stdin;
 
 static DEATH_PENALTY: isize = -3;
-
 
 struct Snake {
     points: Vec<Point>,
@@ -129,6 +128,10 @@ struct Board {
 }
 
 impl Board {
+    fn multiplayer(&self) -> bool{
+        self.players.len() > 1
+    }
+
     fn new_egg_position(&self) -> Point{
         loop{
             let point = Point::random(self.width, self.height);
@@ -179,9 +182,11 @@ impl Board {
         let mut eggs_eaten = vec![];
         let mut dead_players = vec![];
 
-        let (player0, player1) = unpack( &self.players);
-        if player0.head() == player1.head(){
-            panic!(game_over_message(&*self.players, &[0, 1]))
+        if self.multiplayer() {
+            let (player0, player1) = unpack( &self.players);
+            if player0.head() == player1.head(){
+                panic!(game_over_message(&*self.players, &[0, 1]))
+            }
         }
 
         for player in &mut self.players {
@@ -217,6 +222,15 @@ impl Board {
 }
 
 fn game_over_message(players: &[Snake], dead_players: &[usize]) -> String{
+    if players.len() == 1 {
+        return format!(
+            "\r\n\
+            Game Over:\r\n\
+            {}\r\n",
+            players[0].score(false),
+        )
+    }
+
     let (player0, player1) = unpack(players);
     let player0_dead = dead_players.contains(&(0 as usize));
     let player1_dead = dead_players.contains(&(1 as usize));
@@ -245,10 +259,11 @@ fn game_over_message(players: &[Snake], dead_players: &[usize]) -> String{
     };
 
     return format!(
-        "Game Over:\n\
-        {}\n\
-        {}\n\
-        {}____{}",
+        "\r\n\
+        Game Over:\r\n\
+        {}\r\n\
+        {}\r\n\
+        {}____{}\r\n",
         message,
         winner,
         score0,
@@ -275,14 +290,22 @@ fn draw(stdout: &mut RawTerminal<Stdout>, board: &Board) {
 
     writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 1), "██".repeat(board.width + 1)).unwrap();
 
-    let (player0, player1) = unpack(&board.players);
-    writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 2), player0.points.len() - 1).unwrap();
-    writeln!(stdout, "{}{}", termion::cursor::Goto(board.width as u16 * 2, board.height as u16 + 2), player1.points.len() - 1).unwrap();
+    if board.multiplayer(){
+        let (player0, player1) = unpack(&board.players);
+        writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 2), player0.points.len() - 1).unwrap();
+        writeln!(stdout, "{}{}", termion::cursor::Goto(board.width as u16 * 2, board.height as u16 + 2), player1.points.len() - 1).unwrap();
+    }else{
+        let player0 = &board.players[0];
+        writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 2), player0.points.len() - 1).unwrap();
+    }
 
     stdout.flush().unwrap();
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    let multiplayer = args.len() > 1 && args[1] == "m";
+
     let mut stdout = stdout().into_raw_mode().unwrap();
     let mut stdin = async_stdin().keys();
 
@@ -306,6 +329,12 @@ fn main() {
                     },
                 ],
             },
+
+        ]
+    };
+
+    if multiplayer{
+        board.players.push(
             Snake{
                 direction: Direction::Left,
                 points: vec![
@@ -315,8 +344,9 @@ fn main() {
                     },
                 ],
             },
-        ]
-    };
+        )
+    }
+
     board.add_eggs(eggs);
 
     let mut iteration = 0;
@@ -330,22 +360,37 @@ fn main() {
         iteration +=1;
         thread::sleep(time::Duration::from_millis(1000/steps_per_second/reads_per_step));
         let result = stdin.next();
-        let (player0, player1) = unpack_mut(&mut board.players);
 
-        if let Some(Ok(key)) = result {
-            match key {
-                Key::Char('q') => break,
-                Key::Left => player1.set_direction(Direction::Left),
-                Key::Right => player1.set_direction(Direction::Right),
-                Key::Up => player1.set_direction(Direction::Up),
-                Key::Down => player1.set_direction(Direction::Down),
-                Key::Char('a') => player0.set_direction(Direction::Left),
-                Key::Char('d') => player0.set_direction(Direction::Right),
-                Key::Char('w') => player0.set_direction(Direction::Up),
-                Key::Char('s') => player0.set_direction(Direction::Down),
-                _ => {},
+        if board.multiplayer() {
+            let (player0, player1) = unpack_mut(&mut board.players);
+            if let Some(Ok(key)) = result {
+                match key {
+                    Key::Char('q') => break,
+                    Key::Left => player1.set_direction(Direction::Left),
+                    Key::Right => player1.set_direction(Direction::Right),
+                    Key::Up => player1.set_direction(Direction::Up),
+                    Key::Down => player1.set_direction(Direction::Down),
+                    Key::Char('a') => player0.set_direction(Direction::Left),
+                    Key::Char('d') => player0.set_direction(Direction::Right),
+                    Key::Char('w') => player0.set_direction(Direction::Up),
+                    Key::Char('s') => player0.set_direction(Direction::Down),
+                    _ => {}
+                }
+            }
+        }else{
+            let player0 = &mut board.players[0];
+            if let Some(Ok(key)) = result {
+                match key {
+                    Key::Char('q') => break,
+                    Key::Left => player0.set_direction(Direction::Left),
+                    Key::Right => player0.set_direction(Direction::Right),
+                    Key::Up => player0.set_direction(Direction::Up),
+                    Key::Down => player0.set_direction(Direction::Down),
+                    _ => {}
+                }
             }
         }
+
 
         if iteration % reads_per_step == 0 {
             board.step()
