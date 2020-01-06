@@ -104,22 +104,6 @@ fn contains_point(points: &[Point], point: Point) -> bool{
     find_point(points, point).is_some()
 }
 
-fn unpack_mut<T>(pair: &mut [T]) -> (&mut T, &mut T){
-    if let [player0, player1] = &mut pair[..2]{
-        (player0, player1)
-    }else{
-        panic!("Wrong number of items")
-    }
-}
-
-fn unpack<T>(pair: &[T]) -> (&T, &T){
-    if let [player0, player1] = &pair[..2]{
-        (player0, player1)
-    }else{
-        panic!("Wrong number of items")
-    }
-}
-
 struct Board {
     width: usize,
     height: usize,
@@ -128,10 +112,6 @@ struct Board {
 }
 
 impl Board {
-    fn multiplayer(&self) -> bool{
-        self.players.len() > 1
-    }
-
     fn new_egg_position(&self) -> Point{
         loop{
             let point = Point::random(self.width, self.height);
@@ -182,8 +162,7 @@ impl Board {
         let mut eggs_eaten = vec![];
         let mut dead_players = vec![];
 
-        if self.multiplayer() {
-            let (player0, player1) = unpack( &self.players);
+        if let [player0, player1] = &self.players[..]{
             if player0.head() == player1.head(){
                 panic!(game_over_message(&*self.players, &[0, 1]))
             }
@@ -222,7 +201,45 @@ impl Board {
 }
 
 fn game_over_message(players: &[Snake], dead_players: &[usize]) -> String{
-    if players.len() == 1 {
+    if let [player0, player1] = &players[..] {
+        let player0_dead = dead_players.contains(&(0 as usize));
+        let player1_dead = dead_players.contains(&(1 as usize));
+
+        let message = if player0_dead && player1_dead {
+            "Both died"
+        } else if player0_dead {
+            "Player 1 died"
+        } else {
+            "Player 2 died"
+        };
+
+        let score0 = player0.score(player0_dead);
+        let score1 = player1.score(player1_dead);
+
+        let winner = if score0 > score1 {
+            "Player 1 wins"
+        } else if score0 < score1 {
+            "Player 2 wins"
+        } else if player0_dead && player1_dead {
+            "Draw"
+        } else if player0_dead {
+            "Player 2 wins"
+        } else {
+            "Player 1 wins"
+        };
+
+        return format!(
+            "\r\n\
+            Game Over:\r\n\
+            {}\r\n\
+            {}\r\n\
+            {}____{}\r\n",
+            message,
+            winner,
+            score0,
+            score1,
+        )
+    }else {
         return format!(
             "\r\n\
             Game Over:\r\n\
@@ -230,45 +247,6 @@ fn game_over_message(players: &[Snake], dead_players: &[usize]) -> String{
             players[0].score(false),
         )
     }
-
-    let (player0, player1) = unpack(players);
-    let player0_dead = dead_players.contains(&(0 as usize));
-    let player1_dead = dead_players.contains(&(1 as usize));
-
-    let message = if player0_dead && player1_dead {
-        "Both died"
-    } else if player0_dead {
-        "Player 1 died"
-    }else {
-        "Player 2 died"
-    };
-
-    let score0 = player0.score(player0_dead);
-    let score1 = player1.score(player1_dead);
-
-    let winner = if score0 > score1 {
-        "Player 1 wins"
-    }else if score0 < score1 {
-        "Player 2 wins"
-    }else if player0_dead && player1_dead {
-        "Draw"
-    }else if player0_dead {
-        "Player 2 wins"
-    }else{
-        "Player 1 wins"
-    };
-
-    return format!(
-        "\r\n\
-        Game Over:\r\n\
-        {}\r\n\
-        {}\r\n\
-        {}____{}\r\n",
-        message,
-        winner,
-        score0,
-        score1,
-    )
 }
 
 fn draw(stdout: &mut RawTerminal<Stdout>, board: &Board) {
@@ -290,8 +268,7 @@ fn draw(stdout: &mut RawTerminal<Stdout>, board: &Board) {
 
     writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 1), "██".repeat(board.width + 1)).unwrap();
 
-    if board.multiplayer(){
-        let (player0, player1) = unpack(&board.players);
+   if let [player0, player1] = &board.players[..] {
         writeln!(stdout, "{}{}", termion::cursor::Goto(1, board.height as u16 + 2), player0.points.len() - 1).unwrap();
         writeln!(stdout, "{}{}", termion::cursor::Goto(board.width as u16 * 2, board.height as u16 + 2), player1.points.len() - 1).unwrap();
     }else{
@@ -361,8 +338,7 @@ fn main() {
         thread::sleep(time::Duration::from_millis(1000/steps_per_second/reads_per_step));
         let result = stdin.next();
 
-        if board.multiplayer() {
-            let (player0, player1) = unpack_mut(&mut board.players);
+        if let [player0, player1] = &mut board.players[..] {
             if let Some(Ok(key)) = result {
                 match key {
                     Key::Char('q') => break,
